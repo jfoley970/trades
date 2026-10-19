@@ -1,0 +1,51 @@
+# Phase 0: LAN-only mode on claudesandbox (10.225.30.31). Nothing public, no ACME, no Linode token.
+# Usage:  docker compose -f docker-compose.yml -f docker-compose.lan.yml up -d --build
+# (or set COMPOSE_FILE=docker-compose.yml:docker-compose.lan.yml in .env, as done on the VM)
+#
+# Differences vs. prod (docker-compose.yml):
+#   - Caddy: infra/caddy/Caddyfile.lan (HTTP :80 + HTTPS w/ internal CA on 10.225.30.31, path routing).
+#     The custom caddy-dns/linode image is still built, just not used for DNS-01 yet.
+#   - LiveKit: infra/livekit/livekit.lan.yaml (node_ip 10.225.30.31, no TURN).
+#   - Skipped via profile "later": admin (no app yet), coturn (not needed on a flat LAN),
+#     minio (not needed by the phase 0 API). Start them with --profile later once ready.
+
+services:
+  caddy:
+    volumes:
+      - ./infra/caddy/Caddyfile.lan:/etc/caddy/Caddyfile:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:80/"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+    depends_on:
+      api: { condition: service_started }
+
+  api:
+    environment:
+      PUBLIC_API_URL: http://${APP_LAN_IP}/api
+      LIVEKIT_URL: ws://${APP_LAN_IP}             # via Caddy /rtc; direct: ws://${APP_LAN_IP}:7880
+      LIVEKIT_API_URL: http://host.docker.internal:7880
+
+  worker:
+    environment:
+      ROLE: worker
+
+  livekit:
+    image: livekit/livekit-server:${LIVEKIT_VERSION:-latest}
+    environment:
+      NODE_IP: ${APP_LAN_IP}
+    volumes:
+      - ./infra/livekit/livekit.lan.yaml:/etc/livekit.yaml:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:7880/"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+
+  admin:
+    profiles: ["later"]
+  coturn:
+    profiles: ["later"]
+  minio:
+    profiles: ["later"]

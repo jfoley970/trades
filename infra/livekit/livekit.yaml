@@ -1,0 +1,54 @@
+# LiveKit server: single node on the app VM (host networking).
+# API keys come from LIVEKIT_KEYS env; node IP from NODE_IP env (= APP_PUBLIC_IP), see docker-compose.yml.
+port: 7880                    # HTTP/WS signaling. Proxied by Caddy as rtc.advancedsettings.cloud. NOT public.
+log_level: info
+
+rtc:
+  tcp_port: 7881              # ICE/TCP fallback (public TCP)
+  # UDP media range. LiveKit's default is 50000-60000; narrowed to 1,000 ports here
+  # (~1 port per peer connection, 2 per participant => ~500 participants). Widen if needed;
+  # must match ufw + edge firewall/NAT rules.
+  port_range_start: 50000
+  port_range_end: 50999
+  # Static public IP block: don't discover via STUN; advertise the app VM's public IP explicitly.
+  use_external_ip: false
+  # node_ip is set by NODE_IP env (--node-ip) from APP_PUBLIC_IP in .env. Hard-code here instead if preferred:
+  # node_ip: 203.0.113.10
+  # Only bind/gather on the VM's main NIC, not docker bridges (adjust NIC name: ens18 on Proxmox/virtio, eth0, etc.)
+  interfaces:
+    excludes:
+      - docker0
+  # External TURN (coturn). LiveKit mints time-limited creds from the shared secret and hands them to clients.
+  turn_servers:
+    - host: turn.advancedsettings.cloud
+      port: 5349
+      protocol: tls
+      secret_file: /run/secrets/turn_secret
+    - host: turn.advancedsettings.cloud
+      port: 3478
+      protocol: udp
+      secret_file: /run/secrets/turn_secret
+    # If coturn gets its own public IP listening on 443 (see ARCHITECTURE.md §9), add/prefer:
+    # - host: turn.advancedsettings.cloud
+    #   port: 443
+    #   protocol: tls
+    #   secret_file: /run/secrets/turn_secret
+
+# Embedded LiveKit TURN disabled; coturn handles TURN. (If you ever switch to embedded TURN instead,
+# set turn.enabled: true, turn.domain: turn.advancedsettings.cloud, and give it the exported wildcard cert.)
+turn:
+  enabled: false
+
+redis:
+  address: 127.0.0.1:6379     # enables multi-node later
+
+room:
+  empty_timeout: 300
+  max_participants: 4         # customer + tech (+ supervisor/admin)
+
+# prometheus:
+#   port: 6789
+# webhook:
+#   api_key: <LIVEKIT_API_KEY>
+#   urls:
+#     - http://127.0.0.1:3000/webhooks/livekit

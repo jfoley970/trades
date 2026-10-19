@@ -1,0 +1,25 @@
+{
+  "name": "@trades-dispatch/api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Trades Dispatch API (phase 0 skeleton: health + LiveKit token). Fastify + TypeScript.",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/main.js",
+    "worker": "node dist/worker.js",
+    "dev": "tsc -p tsconfig.json && node dist/main.js"
+  },
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "fastify": "^5.2.0",
+    "ioredis": "^5.4.2",
+    "livekit-server-sdk": "^2.9.0",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/pg": "^8.11.10",
+    "typescript": "^5.7.2"
+  }
+}

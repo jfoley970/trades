@@ -1,0 +1,6 @@
+.env
+secrets
+**/node_modules
+**/dist
+infra/coturn/certs
+*.md

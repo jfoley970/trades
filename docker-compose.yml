@@ -1,0 +1,195 @@
+# Trades Dispatch: single-VM skeleton (Ubuntu 24.04 VM in James's home cluster, Docker Compose v2)
+# Domain: *.advancedsettings.cloud  (api. / admin. / rtc. via Caddy, turn. via coturn)
+# SKELETON ONLY: not deployed. See DEPLOY.md. Copy .env.example -> .env and fill in values first.
+#
+# Exposure model:
+#   - Caddy publishes 80/443 (bridge network, goes through Docker's DOCKER-USER chain, NOT ufw).
+#   - LiveKit + coturn use host networking (real UDP ports; governed by ufw INPUT rules).
+#   - Everything else binds 127.0.0.1 only.
+
+name: trades-dispatch
+
+x-restart: &restart
+  restart: unless-stopped
+
+services:
+  caddy:
+    <<: *restart
+    build:
+      context: ./infra/caddy            # xcaddy build with github.com/caddy-dns/linode
+    image: trades-dispatch/caddy-linode:dev
+    ports:
+      # Bind to the app VM's LAN IP (the 1:1 NAT target). Keeps 443 free on TURN_LAN_IP for coturn-on-443.
+      - "${APP_LAN_IP:-0.0.0.0}:80:80"
+      - "${APP_LAN_IP:-0.0.0.0}:443:443"
+      - "${APP_LAN_IP:-0.0.0.0}:443:443/udp"   # HTTP/3
+    environment:
+      ACME_EMAIL: ${ACME_EMAIL}
+      LINODE_DNS_API_TOKEN: ${LINODE_DNS_API_TOKEN}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # reach LiveKit (host network) on :7880
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data                     # certs live here; exported for coturn by infra/scripts/export-certs.sh
+      - caddy_config:/config
+    networks: [edge]
+
+  api:
+    <<: *restart
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    image: trades-dispatch/api:dev
+    command: ["node", "dist/main.js"]
+    env_file: .env
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 3000
+      PUBLIC_API_URL: https://api.${DOMAIN}
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379
+      LIVEKIT_URL: wss://rtc.${DOMAIN}             # given to mobile clients
+      LIVEKIT_API_URL: http://host.docker.internal:7880
+      S3_ENDPOINT: http://minio:9000
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    networks: [edge, backend]
+
+  worker:
+    <<: *restart
+    image: trades-dispatch/api:dev        # same image as api, different entrypoint
+    command: ["node", "dist/worker.js"]   # BullMQ: offer timeouts, reminders, push, webhooks
+    env_file: .env
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379
+      S3_ENDPOINT: http://minio:9000
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    networks: [backend]
+
+  admin:
+    <<: *restart
+    build:
+      context: .
+      dockerfile: apps/admin/Dockerfile
+    image: trades-dispatch/admin:dev
+    environment:
+      PORT: 3001
+      NEXT_PUBLIC_API_URL: https://api.${DOMAIN}
+    ports:
+      - "127.0.0.1:3001:3001"
+    networks: [edge]
+
+  postgres:
+    <<: *restart
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"   # local admin/backups only, never public
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    shm_size: 256mb
+    networks: [backend]
+
+  redis:
+    <<: *restart
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]  # noeviction: BullMQ requirement
+    volumes:
+      - redis_data:/data
+    ports:
+      - "127.0.0.1:6379:6379"   # LiveKit (host network) connects here
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    networks: [backend]
+
+  minio:
+    # S3-compatible storage for license docs, COIs, photos, recordings.
+    # Check MinIO's current community licensing/distribution; swap for Garage/SeaweedFS if preferred.
+    <<: *restart
+    image: minio/minio:latest
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY}
+    volumes:
+      - s3_data:/data
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    networks: [backend]
+
+  livekit:
+    <<: *restart
+    image: livekit/livekit-server:latest   # pin a version for prod
+    command: ["--config", "/etc/livekit.yaml"]
+    network_mode: host                      # 7880/tcp (internal only), 7881/tcp, 50000-50999/udp
+    environment:
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
+      NODE_IP: ${APP_PUBLIC_IP}             # --node-ip: advertised ICE candidate (use_external_ip: false)
+    volumes:
+      - ./infra/livekit/livekit.yaml:/etc/livekit.yaml:ro
+      - ./secrets/turn_secret:/run/secrets/turn_secret:ro   # same value as TURN_SECRET (see DEPLOY.md)
+    depends_on:
+      redis: { condition: service_healthy }
+
+  coturn:
+    <<: *restart
+    image: coturn/coturn:4
+    network_mode: host                      # 3478 udp/tcp, 5349 tcp, relay 49160-49200/udp
+    command:
+      - "-c"
+      - "/etc/coturn/turnserver.conf"
+      - "--static-auth-secret=${TURN_SECRET}"
+      - "--realm=turn.${DOMAIN}"
+      - "--server-name=turn.${DOMAIN}"
+      # 1:1 NAT: public/private. If the public IP is routed directly onto the VM, use just the public IP.
+      - "--external-ip=${TURN_PUBLIC_IP}/${TURN_LAN_IP}"
+      - "--listening-ip=${TURN_LAN_IP}"
+      - "--relay-ip=${TURN_LAN_IP}"
+    volumes:
+      - ./infra/coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
+      # Wildcard cert exported from caddy_data by infra/scripts/export-certs.sh (fullchain.pem + privkey.pem).
+      # Alternative: mount caddy_data read-only and point cert=/pkey= at the wildcard_ files, but Caddy's key
+      # is root-only (0600), so coturn would have to run as root (user: "0:0"). The export script avoids that.
+      - ./infra/coturn/certs:/etc/coturn/certs:ro
+
+  # Phase 2 (optional): consented recording via LiveKit Egress (track egress preferred).
+  # egress:
+  #   image: livekit/egress:latest
+  #   network_mode: host
+  #   environment:
+  #     EGRESS_CONFIG_FILE: /etc/egress.yaml
+  #   volumes:
+  #     - ./infra/livekit/egress.yaml:/etc/egress.yaml:ro
+  #   cap_add: [SYS_ADMIN]
+
+volumes:
+  caddy_data:
+  caddy_config:
+  pg_data:
+  redis_data:
+  s3_data:
+
+networks:
+  edge:
+  backend:

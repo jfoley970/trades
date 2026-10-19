@@ -1,0 +1,45 @@
+# Phase 0 / LAN-only Caddyfile (used by docker-compose.lan.yml instead of ./Caddyfile).
+# No public certs, no ACME, no Linode token: HTTP on :80 plus HTTPS on the VM IP with Caddy's internal CA.
+# Path-based routing (no DNS on the LAN yet):
+#   /api/*            -> api:3000 (prefix stripped, so /api/health -> /health)
+#   /rtc, /rtc/*      -> LiveKit signaling (host network :7880); clients use LIVEKIT_URL=ws://10.225.30.31
+#   /twirp/*          -> LiveKit server API (RoomService etc.)
+#   /livekit          -> LiveKit root ("OK"), for quick checks
+{
+	local_certs
+	auto_https disable_redirects
+	default_sni 10.225.30.31
+	skip_install_trust
+}
+
+(routes) {
+	encode zstd gzip
+
+	handle_path /api/* {
+		reverse_proxy api:3000
+	}
+
+	@livekit path /rtc /rtc/* /twirp/*
+	handle @livekit {
+		reverse_proxy host.docker.internal:7880
+	}
+
+	handle /livekit {
+		rewrite * /
+		reverse_proxy host.docker.internal:7880
+	}
+
+	handle {
+		header Content-Type application/json
+		respond `{"service":"trades-dispatch","mode":"lan","routes":["/api/health","POST /api/livekit/token","/rtc (LiveKit ws)","/livekit"]}` 200
+	}
+}
+
+http://:80 {
+	import routes
+}
+
+https://10.225.30.31 {
+	tls internal
+	import routes
+}

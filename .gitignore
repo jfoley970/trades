@@ -1,0 +1,6 @@
+.env
+secrets/*
+!secrets/.gitkeep
+infra/coturn/certs/*.pem
+node_modules/
+dist/

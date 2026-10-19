@@ -1,0 +1,46 @@
+# Single wildcard site for *.advancedsettings.cloud
+# Cert: Let's Encrypt wildcard via DNS-01 against Linode DNS (caddy-dns/linode plugin, see Dockerfile).
+# Stored in the caddy_data volume at:
+#   /data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/wildcard_.advancedsettings.cloud/
+# infra/scripts/export-certs.sh copies it out for coturn (turns:5349).
+{
+	email {$ACME_EMAIL}
+}
+
+*.advancedsettings.cloud {
+	tls {
+		dns linode {env.LINODE_DNS_API_TOKEN}
+		# Linode DNS changes take a bit to reach its nameservers; settings from the plugin README.
+		propagation_delay 2m
+		propagation_timeout -1
+		dns_ttl 30s
+		resolvers 1.1.1.1
+	}
+
+	encode zstd gzip
+
+	@api host api.advancedsettings.cloud
+	handle @api {
+		reverse_proxy api:3000                      # REST + Socket.IO (WebSocket upgrades automatic)
+	}
+
+	@admin host admin.advancedsettings.cloud
+	handle @admin {
+		# Admin/dispatcher console: LAN/VPN only (RFC1918 + Tailscale CGNAT range).
+		# Note: with hairpin NAT from the LAN the source may show as the router's private IP, which is still allowed.
+		@outside not remote_ip private_ranges 100.64.0.0/10
+		respond @outside "Forbidden" 403
+		reverse_proxy admin:3001
+	}
+
+	@rtc host rtc.advancedsettings.cloud
+	handle @rtc {
+		reverse_proxy host.docker.internal:7880     # LiveKit signaling (WSS); LiveKit runs on host network
+	}
+
+	# turn.advancedsettings.cloud is served by coturn directly (3478/5349), not Caddy.
+	# Anything else under the wildcard: drop the connection.
+	handle {
+		abort
+	}
+}

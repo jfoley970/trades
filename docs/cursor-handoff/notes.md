@@ -1,0 +1,3 @@
+- [ ] [Live beta](/cursor/stores/bc-f305ac40-a2ff-4fed-80a1-c2f241bcc754/docs/live-beta.md) — confirmed up at http://10.225.30.31/api/health; LiveKit still off
+- [ ] [Trades Dispatch](/cursor/stores/bc-f305ac40-a2ff-4fed-80a1-c2f241bcc754/docs/project-context.md) — Phase 0 on main; work stays on trades-pc
+- [x] [Survey trades project](bc-2c4791da-4318-52ea-85b4-9e6b1d344adf) — checkout read

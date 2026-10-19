@@ -1,3 +1,5 @@
+A new chat should read `docs/cursor-handoff/resume.md` first, then `docs/CONVERSATION.md`.
+
 # Agent notes
 
 Read `docs/CONVERSATION.md` first. It has the full history and the decisions so far. Then read `ARCHITECTURE.md` for the design and `DEPLOY.md` for the runbook.

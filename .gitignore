@@ -4,3 +4,4 @@ secrets/*
 infra/coturn/certs/*.pem
 node_modules/
 dist/
+dist-test/

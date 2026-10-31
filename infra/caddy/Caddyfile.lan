@@ -31,7 +31,7 @@
 
 	handle {
 		header Content-Type application/json
-		respond `{"service":"trades-dispatch","mode":"lan","routes":["/api/health","POST /api/livekit/token","/rtc (LiveKit ws)","/livekit"]}` 200
+		respond `{"service":"trades-dispatch","mode":"lan","routes":["/api/health","GET /api/house-calls","POST /api/house-calls","POST /api/livekit/token","/rtc (LiveKit ws)","/livekit"]}` 200
 	}
 }
 

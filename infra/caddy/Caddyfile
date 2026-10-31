@@ -19,6 +19,7 @@
 
 	encode zstd gzip
 
+	# Do not publish this host until login exists. /house-calls and /livekit/token are unauthenticated.
 	@api host api.advancedsettings.cloud
 	handle @api {
 		reverse_proxy api:3000                      # REST + Socket.IO (WebSocket upgrades automatic)

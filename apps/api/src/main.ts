@@ -1,14 +1,41 @@
 import Fastify from 'fastify';
 import { config } from './config';
+import { addLanCors } from './cors';
 import { pg, redis } from './deps';
 import { healthReport } from './health';
+import {
+  createMemoryHouseCallStore,
+  createPgHouseCallStore,
+  registerHouseCallRoutes,
+} from './house-calls';
 import { issueToken, validateTokenRequest } from './livekit';
 
-// Phase 0 skeleton. NOTE: /livekit/token is UNAUTHENTICATED for LAN testing only.
-// Before going public it must require an authenticated user and derive room/identity from a job record.
+// Phase 0 skeleton.
+// /livekit/token and /house-calls are UNAUTHENTICATED. Login is not implemented.
+// Keep this API on the LAN. Do not expose it to the public internet.
+// Before going public, /livekit/token must require an authenticated user and derive room/identity from a job record.
 const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' }, trustProxy: true });
 
-app.get('/', async () => ({ service: 'trades-dispatch-api', endpoints: ['GET /health', 'POST /livekit/token'] }));
+addLanCors(app);
+
+const memoryStore = process.env.HOUSE_CALLS_STORE === 'memory';
+if (memoryStore) {
+  app.log.warn('HOUSE_CALLS_STORE=memory: house calls are not saved in Postgres. Local UI testing only.');
+}
+registerHouseCallRoutes(
+  app,
+  memoryStore
+    ? createMemoryHouseCallStore()
+    : createPgHouseCallStore({
+        query: (text, values) => pg.query(text, values),
+      }),
+);
+
+app.get('/', async () => ({
+  service: 'trades-dispatch-api',
+  login: 'missing',
+  endpoints: ['GET /health', 'GET /house-calls', 'POST /house-calls', 'POST /livekit/token'],
+}));
 
 app.get('/health', async (_req, reply) => {
   const report = await healthReport();

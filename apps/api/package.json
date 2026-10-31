@@ -2,13 +2,14 @@
   "name": "@trades-dispatch/api",
   "version": "0.1.0",
   "private": true,
-  "description": "Trades Dispatch API (phase 0 skeleton: health + LiveKit token). Fastify + TypeScript.",
+  "description": "Trades Dispatch API (phase 0: health, LAN house calls, LiveKit token). Fastify + TypeScript. Login is not implemented.",
   "main": "dist/main.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "node dist/main.js",
     "worker": "node dist/worker.js",
-    "dev": "tsc -p tsconfig.json && node dist/main.js"
+    "dev": "tsc -p tsconfig.json && node dist/main.js",
+    "test": "tsc -p tsconfig.test.json && node --test dist-test/test/house-calls.test.js"
   },
   "engines": { "node": ">=20" },
   "dependencies": {
